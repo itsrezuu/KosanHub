@@ -22,34 +22,40 @@ class InvoiceService
     {
         $period = $period ?? now()->format('Y-m');
 
-        $exists = Invoice::where('contract_id', $contract->id)
-            ->where('period', $period)
-            ->exists();
+        return DB::transaction(function () use ($contract, $period): Invoice {
+            $contract = Contract::query()
+                ->lockForUpdate()
+                ->findOrFail($contract->id);
 
-        if ($exists) {
-            throw ValidationException::withMessages([
-                'period' => ["Tagihan untuk periode {$period} sudah ada."],
+            $exists = Invoice::where('contract_id', $contract->id)
+                ->where('period', $period)
+                ->exists();
+
+            if ($exists) {
+                throw ValidationException::withMessages([
+                    'period' => ["Tagihan untuk periode {$period} sudah ada."],
+                ]);
+            }
+
+            if ($contract->status !== 'active') {
+                throw ValidationException::withMessages([
+                    'contract' => ['Hanya kontrak aktif yang boleh digenerate tagihannya.'],
+                ]);
+            }
+
+            $amount = $this->contractService->calculateProportionalAmount($contract, $period);
+            $dueDate = Carbon::createFromFormat('Y-m', $period)->endOfMonth()->addDays(7);
+
+            return Invoice::create([
+                'contract_id' => $contract->id,
+                'period' => $period,
+                'due_date' => $dueDate,
+                'amount' => $amount,
+                'penalty' => 0,
+                'total' => $amount,
+                'status' => 'unpaid',
             ]);
-        }
-
-        if ($contract->status !== 'active') {
-            throw ValidationException::withMessages([
-                'contract' => ['Hanya kontrak aktif yang boleh digenerate tagihannya.'],
-            ]);
-        }
-
-        $amount = $this->contractService->calculateProportionalAmount($contract, $period);
-        $dueDate = Carbon::createFromFormat('Y-m', $period)->endOfMonth()->addDays(7);
-
-        return Invoice::create([
-            'contract_id' => $contract->id,
-            'period' => $period,
-            'due_date' => $dueDate,
-            'amount' => $amount,
-            'penalty' => 0,
-            'total' => $amount,
-            'status' => 'unpaid',
-        ]);
+        });
     }
 
     /**

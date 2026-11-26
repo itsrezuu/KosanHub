@@ -7,6 +7,7 @@ use App\Models\Contract;
 use App\Models\Room;
 use App\Services\ContractService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ContractController extends Controller
 {
@@ -28,45 +29,48 @@ class ContractController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
-            'room_id'      => 'required|exists:rooms,id',
-            'tenant_id'    => 'required|exists:tenants,id',
-            'start_date'   => 'required|date',
-            'end_date'     => 'nullable|date|after:start_date',
+            'room_id' => 'required|exists:rooms,id',
+            'tenant_id' => 'required|exists:tenants,id',
+            'start_date' => 'required|date',
+            'end_date' => 'nullable|date|after:start_date',
             'monthly_rent' => 'nullable|numeric|min:0',
-            'notes'        => 'nullable|string',
+            'notes' => 'nullable|string',
         ]);
 
-        $room = Room::findOrFail($data['room_id']);
+        return DB::transaction(function () use ($data) {
+            $room = Room::query()
+                ->lockForUpdate()
+                ->findOrFail($data['room_id']);
 
-        // Aturan bisnis: 1 kamar = 1 kontrak aktif
-        if ($room->activeContract()->exists()) {
-            return response()->json([
-                'message' => 'Kamar ini sudah memiliki kontrak aktif. Tidak boleh double booking.',
-            ], 422);
-        }
+            if ($room->activeContract()->exists()) {
+                return response()->json([
+                    'message' => 'Kamar ini sudah memiliki kontrak aktif. Tidak boleh double booking.',
+                ], 422);
+            }
 
-        if ($room->status !== 'available') {
-            return response()->json([
-                'message' => 'Kamar tidak tersedia (status: ' . $room->status . ').',
-            ], 422);
-        }
+            if ($room->status !== 'available') {
+                return response()->json([
+                    'message' => 'Kamar tidak tersedia (status: '.$room->status.').',
+                ], 422);
+            }
 
-        $contract = Contract::create([
-            'room_id'      => $data['room_id'],
-            'tenant_id'    => $data['tenant_id'],
-            'start_date'   => $data['start_date'],
-            'end_date'     => $data['end_date'] ?? null,
-            'monthly_rent' => $data['monthly_rent'] ?? $room->monthly_rent,
-            'status'       => 'active',
-            'notes'        => $data['notes'] ?? null,
-        ]);
+            $contract = Contract::create([
+                'room_id' => $data['room_id'],
+                'tenant_id' => $data['tenant_id'],
+                'start_date' => $data['start_date'],
+                'end_date' => $data['end_date'] ?? null,
+                'monthly_rent' => $data['monthly_rent'] ?? $room->monthly_rent,
+                'status' => 'active',
+                'notes' => $data['notes'] ?? null,
+            ]);
 
-        $room->update(['status' => 'occupied']);
+            $room->update(['status' => 'occupied']);
 
-        return response()->json(
-            $contract->load(['room.property', 'tenant']),
-            201
-        );
+            return response()->json(
+                $contract->load(['room.property', 'tenant']),
+                201
+            );
+        });
     }
 
     public function show(Contract $contract)
@@ -85,7 +89,7 @@ class ContractController extends Controller
         }
 
         $contract->update([
-            'status'   => 'ended',
+            'status' => 'ended',
             'end_date' => $request->input('end_date', now()->toDateString()),
         ]);
 

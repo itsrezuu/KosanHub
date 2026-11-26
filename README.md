@@ -34,4 +34,4 @@ php artisan migrate --seed
 php artisan serve
 ```
 
-`php artisan migrate --seed` membuat skema dan data demo (properti, kamar, penyewa, dan kontrak). Jalankan `php artisan test` untuk tes otomatis. `GET /health` mengembalikan status HTTP 200 serta status koneksi database.
+`php artisan migrate --seed` membuat skema dan data demo (properti, kamar, penyewa, dan kontrak). Jalankan `php artisan test` untuk tes otomatis. `GET /health` mengembalikan HTTP 200 saat database terhubung dan HTTP 503 saat database terputus.
