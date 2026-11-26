@@ -12,8 +12,11 @@ use App\Services\ContractService;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ContractInvoiceFlowTest extends TestCase
@@ -79,6 +82,61 @@ class ContractInvoiceFlowTest extends TestCase
             fn (GenerateMonthlyInvoicesJob $job) => $job->period === '2026-11'
                 && $job->connection === 'redis'
         );
+    }
+
+    public function test_monthly_invoice_job_runs_on_redis_worker_and_persists_active_contracts(): void
+    {
+        if (env('RUN_REDIS_QUEUE_INTEGRATION') !== '1') {
+            $this->markTestSkipped('Set RUN_REDIS_QUEUE_INTEGRATION=1 to run against Redis.');
+        }
+
+        $queue = 'invoice-integration-'.Str::uuid();
+        Config::set('queue.connections.redis.queue', $queue);
+        $activeContractIds = [];
+
+        foreach ([1000000, 1200000] as $monthlyRent) {
+            ['room' => $room, 'tenant' => $tenant] = $this->createContractFixture();
+
+            $activeContractIds[] = $this->postJson('/api/contracts', [
+                'room_id' => $room->id,
+                'tenant_id' => $tenant->id,
+                'start_date' => '2026-11-01',
+                'monthly_rent' => $monthlyRent,
+            ])->assertCreated()->json('id');
+        }
+
+        ['room' => $endedRoom, 'tenant' => $endedTenant] = $this->createContractFixture();
+        $endedContractId = $this->postJson('/api/contracts', [
+            'room_id' => $endedRoom->id,
+            'tenant_id' => $endedTenant->id,
+            'start_date' => '2026-11-01',
+            'monthly_rent' => 900000,
+        ])->assertCreated()->json('id');
+        $this->postJson("/api/contracts/{$endedContractId}/end")->assertOk();
+
+        $this->postJson('/api/invoices/generate-monthly', [
+            'period' => '2026-11',
+        ])->assertAccepted();
+
+        $this->assertSame(0, Artisan::call('queue:work', [
+            'connection' => 'redis',
+            '--queue' => $queue,
+            '--once' => true,
+            '--tries' => 3,
+            '--timeout' => 120,
+        ]));
+
+        $this->assertDatabaseCount('invoices', 2);
+        foreach ($activeContractIds as $contractId) {
+            $this->assertDatabaseHas('invoices', [
+                'contract_id' => $contractId,
+                'period' => '2026-11',
+            ]);
+        }
+        $this->assertDatabaseMissing('invoices', [
+            'contract_id' => $endedContractId,
+            'period' => '2026-11',
+        ]);
     }
 
     public function test_monthly_invoice_generation_rejects_an_invalid_period(): void
