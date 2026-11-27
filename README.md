@@ -2,7 +2,7 @@
 
 **Mata Kuliah:** Komputasi Awan 2026–2027  
 **Studi Kasus:** K12 – KosanHub  
-**Stack:** Laravel 12 + MySQL + Docker + Jenkins
+**Stack:** Laravel 13 + MySQL + Docker + Jenkins
 
 ## Anggota
 - Mikhael Jeremiah Marjorie Tampa (Tech Lead / Backend)
