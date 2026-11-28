@@ -5,7 +5,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM php:8.3-cli-bookworm AS php-build
+FROM php:8.4-cli-bookworm AS php-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libcurl4-openssl-dev \
@@ -40,11 +40,14 @@ RUN composer install \
     --no-progress \
     --no-scripts
 COPY . .
-RUN composer dump-autoload --optimize --no-scripts \
+COPY --from=frontend-build /app/public/build /var/www/html/public/build
+RUN cp .env.example .env \
+    && composer dump-autoload --optimize --no-scripts \
     && php artisan package:discover --ansi \
+    && php artisan key:generate --ansi \
     && php artisan test
 
-FROM php:8.3-apache-bookworm AS production
+FROM php:8.4-apache-bookworm AS production
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
