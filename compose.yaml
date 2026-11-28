@@ -1,0 +1,123 @@
+services:
+  app:
+    image: "${DOCKERHUB_USERNAME:?Set DOCKERHUB_USERNAME in .env}/kosanhub:${IMAGE_TAG:-latest}"
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["sh", "-c", "php artisan migrate --force && exec apache2-foreground"]
+    ports:
+      - "8000:80"
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --fail --silent --show-error http://127.0.0.1/health || exit 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - frontend
+      - backend
+
+  worker:
+    image: "${DOCKERHUB_USERNAME:?Set DOCKERHUB_USERNAME in .env}/kosanhub:${IMAGE_TAG:-latest}"
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      [
+        "php",
+        "artisan",
+        "queue:work",
+        "redis",
+        "--queue=default",
+        "--sleep=3",
+        "--tries=3",
+        "--timeout=120"
+      ]
+    depends_on:
+      app:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          php -r '
+          $$self = getmypid();
+          foreach (glob("/proc/[0-9]*/cmdline") ?: [] as $$file) {
+              if ((int) basename(dirname($$file)) === $$self) {
+                  continue;
+              }
+              $$raw = @file_get_contents($$file);
+              if ($$raw === false || $$raw === "") {
+                  continue;
+              }
+              $$args = explode("\0", trim($$raw, "\0"));
+              if (basename($$args[0] ?? "") === "php"
+                  && in_array("artisan", $$args, true)
+                  && in_array("queue:work", $$args, true)) {
+                  exit(0);
+              }
+          }
+          exit(1);
+          '
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - backend
+
+  database:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: "${DB_DATABASE:?Set DB_DATABASE in .env}"
+      MYSQL_ROOT_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
+      MYSQL_ROOT_HOST: "%"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - backend
+
+volumes:
+  mysql_data:
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
