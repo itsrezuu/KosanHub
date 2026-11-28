@@ -54,19 +54,19 @@ services:
         - CMD-SHELL
         - >-
           php -r '
-          $self = getmypid();
-          foreach (glob("/proc/[0-9]*/cmdline") ?: [] as $file) {
-              if ((int) basename(dirname($file)) === $self) {
+          $$self = getmypid();
+          foreach (glob("/proc/[0-9]*/cmdline") ?: [] as $$file) {
+              if ((int) basename(dirname($$file)) === $$self) {
                   continue;
               }
-              $raw = @file_get_contents($file);
-              if ($raw === false || $raw === "") {
+              $$raw = @file_get_contents($$file);
+              if ($$raw === false || $$raw === "") {
                   continue;
               }
-              $args = explode("\0", trim($raw, "\0"));
-              if (basename($args[0] ?? "") === "php"
-                  && in_array("artisan", $args, true)
-                  && in_array("queue:work", $args, true)) {
+              $$args = explode("\0", trim($$raw, "\0"));
+              if (basename($$args[0] ?? "") === "php"
+                  && in_array("artisan", $$args, true)
+                  && in_array("queue:work", $$args, true)) {
                   exit(0);
               }
           }
